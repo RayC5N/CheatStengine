@@ -22,12 +22,12 @@ static std::string FormatProtectionFlags(DWORD protection)
 
     // Access flags
     if (protection & PAGE_NOACCESS) result += "NOACCESS ";
-    if (protection & PAGE_READONLY) result += "R ";
-    if (protection & PAGE_READWRITE) result += "RW ";
+    if (protection & PAGE_READONLY) result += "READONLY ";
+    if (protection & PAGE_READWRITE) result += "READWRITE ";
     if (protection & PAGE_WRITECOPY) result += "WRITECOPY ";
-    if (protection & PAGE_EXECUTE) result += "X ";
-    if (protection & PAGE_EXECUTE_READ) result += "RX ";
-    if (protection & PAGE_EXECUTE_READWRITE) result += "RWX ";
+    if (protection & PAGE_EXECUTE) result += "EXECUTE ";
+    if (protection & PAGE_EXECUTE_READ) result += "EXECUTE_READ ";
+    if (protection & PAGE_EXECUTE_READWRITE) result += "EXECUTE_READWRITE ";
     if (protection & PAGE_EXECUTE_WRITECOPY) result += "EXECUTE_WRITECOPY ";
 
     // Type flags
@@ -322,6 +322,9 @@ void DisassemblyPane::DrawDisassembly()
                     if (ImGui::RoundedMenuItem("PAGE_READWRITE", nullptr, mbi.Protect & PAGE_READWRITE)) {
                         (void)m_State.Process->Protect(address, 0x1000, PAGE_READWRITE);
                     }
+                    if (ImGui::RoundedMenuItem("PAGE_WRITECOPY", nullptr, mbi.Protect & PAGE_WRITECOPY)) {
+                        (void)m_State.Process->Protect(address, 0x1000, PAGE_WRITECOPY);
+                    }
                     if (ImGui::RoundedMenuItem("PAGE_EXECUTE", nullptr, mbi.Protect & PAGE_EXECUTE)) {
                         (void)m_State.Process->Protect(address, 0x1000, PAGE_EXECUTE);
                     }
@@ -353,7 +356,7 @@ void DisassemblyPane::DrawStatusBar()
     if (std::optional<MEMORY_BASIC_INFORMATION> mbi = m_State.Process->Query(m_SelectedAddress)) {
         protectionStr = FormatProtectionFlags(mbi->Protect);
     }
-    ImGui::Text("Selected Address: 0x%012llX Protect: %s", m_SelectedAddress, protectionStr);
+    ImGui::Text("Selected Address: 0x%012llX Protect: %s", m_SelectedAddress, protectionStr.c_str());
     Fonts::Pop();
 }
 
@@ -486,8 +489,7 @@ void DisassemblyPane::JumpToPointedInstruction(const zasm::Instruction& instr)
     }
 
     INFO("Instruction has 1 operand, checking if it's an immediate...");
-    zasm::Operand op = instr.getOperand(0);
-    zasm::Imm* imm = op.getIf<zasm::Imm>();
+    const zasm::Imm* imm = instr.getOperandIf<zasm::Imm>(0);
     if (!imm) {
         return;
     }
