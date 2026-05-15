@@ -19,4 +19,4 @@ private:
 #define INFO(...)		::Logger::GetLogger()->info(__VA_ARGS__)
 #define WARN(...)		::Logger::GetLogger()->warn(__VA_ARGS__)
 #define ERR(...)		::Logger::GetLogger()->error(__VA_ARGS__)
-#define CRITICAL(...)	        ::Logger::GetLogger()->critical(__VA_ARGS__)
+#define CRITICAL(...)	::Logger::GetLogger()->critical(__VA_ARGS__)
