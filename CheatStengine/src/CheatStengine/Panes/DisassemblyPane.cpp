@@ -14,6 +14,7 @@
 #include <zasm/formatter/formatter.hpp>
 #include <zasm/x86/mnemonic.hpp>
 
+#include <CheatStengine/Tools/PatternGenerator.h>
 #include <format>
 
 static std::string FormatProtectionFlags(DWORD protection)
@@ -55,6 +56,8 @@ DisassemblyPane::DisassemblyPane(State& state, ModalManager& modalManager, Keybi
 {
     m_ModalManager.RegisterModal("Goto Address", BIND_FN(DisassemblyPane::GotoAddressModal));
     m_ModalManager.RegisterModal("Assemble", BIND_FN(DisassemblyPane::AssembleModal));
+    m_ModalManager.RegisterModal("Pattern Generator", BIND_FN(DisassemblyPane::PatternGeneratorModal));
+    m_ModalManager.RegisterModal("Pattern Viewer", BIND_FN(DisassemblyPane::PatternViewerModal));
     m_KeybindManger.RegisterKeybind(
         "Goto Address",
         "Focuses the instruction at the specified address",
@@ -68,44 +71,56 @@ DisassemblyPane::DisassemblyPane(State& state, ModalManager& modalManager, Keybi
         "Disassembly", ImGuiKey_A);
     m_KeybindManger.RegisterKeybind("Go Back",
         "Jumps back to the previous instruction before you jumped to another address",
-        "Disassembly", ImGuiKey_Escape, [this]() {
-            if (m_JumpHistory.empty()) {
-                return;
-            }
-            JumpPoint point = m_JumpHistory.top();
-            m_JumpHistory.pop();
-            FocusAddress(point.FocussedAddress);
-            m_SelectedAddress = point.SelectedAddress;
-        });
+        "Disassembly", ImGuiKey_Escape);
+    m_KeybindManger.RegisterKeybind("Generate Pattern",
+        "Opens the pattern generator modal for the currently focused instruction",
+        "Disassembly", ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_S);
 }
 
 void DisassemblyPane::HandleKeybinds()
 {
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
-        if (m_KeybindManger.IsKeybindPressed("Goto Address")) {
-            m_AddressInput.clear();
-            m_ModalManager.OpenModal("Goto Address");
+    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        return;
+    }
+
+    if (m_KeybindManger.IsKeybindPressed("Go Back")) {
+        if (!m_JumpHistory.empty()) {
+            JumpPoint point = m_JumpHistory.top();
+            m_JumpHistory.pop();
+            ScrollToAddress(point.ScrollAddress);
+            m_SelectedAddress = point.SelectedAddress;
         }
-        if (m_KeybindManger.IsKeybindPressed("Follow Instruction")) {
-            auto it = m_Instructions.find(m_SelectedAddress);
-            if (it != m_Instructions.end()) {
-                const DisassemblyLine& line = it->second;
-                const zasm::InstructionDetail* detail = std::get_if<zasm::InstructionDetail>(&line.Value);
-                if (detail) {
-                    JumpToPointedInstruction(detail->getInstruction());
-                }
+    }
+
+    if (m_KeybindManger.IsKeybindPressed("Follow Instruction")) {
+        auto it = m_Instructions.find(m_SelectedAddress);
+        if (it != m_Instructions.end()) {
+            const DisassemblyLine& line = it->second;
+            const zasm::InstructionDetail* detail = std::get_if<zasm::InstructionDetail>(&line.Value);
+            if (detail) {
+                JumpToPointedInstruction(detail->getInstruction());
             }
         }
-        if (m_KeybindManger.IsKeybindPressed("Assemble")) {
-            auto it = m_Instructions.find(m_SelectedAddress);
-            if (it != m_Instructions.end()) {
-                const DisassemblyLine& line = it->second;
-                const zasm::InstructionDetail* detail = std::get_if<zasm::InstructionDetail>(&line.Value);
-                if (detail) {
-                    m_ModalManager.OpenModal("Assemble", m_SelectedAddress);
-                }
+    }
+
+    if (m_KeybindManger.IsKeybindPressed("Assemble")) {
+        auto it = m_Instructions.find(m_SelectedAddress);
+        if (it != m_Instructions.end()) {
+            const DisassemblyLine& line = it->second;
+            const zasm::InstructionDetail* detail = std::get_if<zasm::InstructionDetail>(&line.Value);
+            if (detail) {
+                m_ModalManager.OpenModal("Assemble", m_SelectedAddress);
             }
         }
+    }
+
+    if (m_KeybindManger.IsKeybindPressed("Goto Address")) {
+        m_AddressInput.clear();
+        m_ModalManager.OpenModal("Goto Address");
+    }
+
+    if (m_KeybindManger.IsKeybindPressed("Generate Pattern")) {
+        m_ModalManager.OpenModal("Pattern Generator", m_SelectedAddress);
     }
 }
 
@@ -169,18 +184,18 @@ void DisassemblyPane::AnalyzePage(uintptr_t pageAddr, size_t pageSize)
 void DisassemblyPane::HandleScrolling()
 {
     int64_t scrollWheel = ImGui::GetIO().MouseWheel;
-    if (scrollWheel > 0 && m_FocussedAddress > 0) {
-        if (auto it = m_Instructions.lower_bound(m_FocussedAddress); it != m_Instructions.begin()) {
-            FocusAddress((--it)->first);
-        } else if (m_FocussedAddress > 0) {
-            m_FocussedAddress--;
+    if (scrollWheel > 0 && m_ScrollAddress > 0) {
+        if (auto it = m_Instructions.lower_bound(m_ScrollAddress); it != m_Instructions.begin()) {
+            ScrollToAddress((--it)->first);
+        } else if (m_ScrollAddress > 0) {
+            m_ScrollAddress--;
         }
     } else if (scrollWheel < 0) {
-        if (auto it = m_Instructions.upper_bound(m_FocussedAddress); it != m_Instructions.end()
-            && m_Instructions.contains(m_FocussedAddress)) {
-            FocusAddress(it->first);
+        if (auto it = m_Instructions.upper_bound(m_ScrollAddress); it != m_Instructions.end()
+            && m_Instructions.contains(m_ScrollAddress)) {
+            ScrollToAddress(it->first);
         } else {
-            m_FocussedAddress++;
+            m_ScrollAddress++;
         }
     }
 }
@@ -197,7 +212,7 @@ void DisassemblyPane::DrawDisassembly()
         ImGui::TableSetupColumn("Instruction");
         ImGui::TableHeadersRow();
 
-        uintptr_t currentAddress = m_FocussedAddress;
+        uintptr_t currentAddress = m_ScrollAddress;
         size_t instructionCount = 0;
         while (instructionCount++ < visibleInstructionCount) {
             ImGui::TableNextRow();
@@ -307,9 +322,6 @@ void DisassemblyPane::DrawDisassembly()
                     }
                     ImGui::EndMenu();
                 }
-                if (ImGui::RoundedMenuItem("Assemble", m_KeybindManger.GetKeybindString("Assemble").c_str())) {
-                    m_ModalManager.OpenModal("Assemble");
-                }
                 if (ImGui::BeginRoundedMenu("Change Page Protection")) {
                     MEMORY_BASIC_INFORMATION mbi = m_State.Process->Query(address).value_or({});
 
@@ -339,6 +351,12 @@ void DisassemblyPane::DrawDisassembly()
                     }
 
                     ImGui::EndMenu();
+                }
+                if (ImGui::RoundedMenuItem("Generate Pattern", m_KeybindManger.GetKeybindString("Generate Pattern").c_str())) {
+                    m_ModalManager.OpenModal("Pattern Generator", address);
+                }
+                if (ImGui::RoundedMenuItem("Assemble", m_KeybindManger.GetKeybindString("Assemble").c_str())) {
+                    m_ModalManager.OpenModal("Assemble");
                 }
                 ImGui::EndPopup();
             }
@@ -377,7 +395,7 @@ void DisassemblyPane::Draw(double deltaTime)
     static double accumulator = 0.0;
     accumulator += deltaTime;
     if (accumulator >= 1.0) {
-        Analyze(m_FocussedAddress);
+        Analyze(m_ScrollAddress);
         accumulator = 0.0;
     }
 
@@ -405,9 +423,9 @@ void DisassemblyPane::Draw(double deltaTime)
     ImGui::End();
 }
 
-void DisassemblyPane::FocusAddress(uintptr_t address)
+void DisassemblyPane::ScrollToAddress(uintptr_t address)
 {
-    m_FocussedAddress = address;
+    m_ScrollAddress = address;
     if (!m_Instructions.contains(address)) {
         Analyze(address);
     }
@@ -415,8 +433,8 @@ void DisassemblyPane::FocusAddress(uintptr_t address)
 
 void DisassemblyPane::JumpToAddress(uintptr_t address)
 {
-    m_JumpHistory.emplace(m_FocussedAddress, m_SelectedAddress);
-    FocusAddress(address);
+    m_JumpHistory.emplace(m_ScrollAddress, m_SelectedAddress);
+    ScrollToAddress(address);
     m_SelectedAddress = address;
 }
 
@@ -523,6 +541,93 @@ void DisassemblyPane::GotoAddressModal(const std::string& name, const std::any& 
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2 { 70.0f, 0 })) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void DisassemblyPane::PatternGeneratorModal(const std::string& name, const std::any& payload)
+{
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2 { 0.5f, 0.5f });
+    if (ImGui::BeginPopupModal(name.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+            && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        uintptr_t address = std::any_cast<uintptr_t>(payload);
+        ImGui::Text("Generate pattern for instruction at 0x%llX", address);
+
+        ImGui::Separator();
+        ImGui::Text("Generator Options:");
+
+        static PatternOptions options;
+
+        // Checkbox options
+        ImGui::Checkbox("Wildcard Relative Immediates", &options.WildcardRelativeImmediates);
+        ImGui::Checkbox("Wildcard RIP Relative Displacement", &options.WildcardRipRelativeDisp);
+        ImGui::Checkbox("Wildcard Absolute Addresses", &options.WildcardAbsoluteAddresses);
+        ImGui::Checkbox("Wildcard All Immediates", &options.WildcardAllImmediates);
+        ImGui::Checkbox("Shortest Unique Pattern", &options.ShortestUnique);
+
+        // Slider for pattern length
+        size_t min = 0, max = 300;
+        ImGui::SliderScalar("Max Pattern Length", ImGuiDataType_U64, &options.MaxPatternLength, &min, &max);
+
+        // Text inputs for separator and wildcard
+        ImGui::InputText("Separator", &options.Separator);
+        ImGui::InputText("Wildcard", &options.Wildcard);
+
+        ImGui::Separator();
+
+        if (ImGui::Button("Generate")) {
+            std::optional<MODULEENTRY32> moduleEntry = Utils::GetModuleForAddress(address, m_State.Modules);
+            size_t start = moduleEntry ? reinterpret_cast<uintptr_t>(moduleEntry->modBaseAddr) : 0;
+            size_t end = moduleEntry ? reinterpret_cast<uintptr_t>(moduleEntry->modBaseAddr) + moduleEntry->modBaseSize : 0x7FFFFFFFFFFF;
+
+            PatternGenerator generator(options);
+            std::optional<PatternResult> pattern = generator.Generate(m_State.Process, address, start, end);
+            if (pattern) {
+                std::string patternStr = pattern->pattern;
+                INFO("Generated pattern: {}", patternStr);
+                m_ModalManager.OpenModal("Pattern Viewer", patternStr);
+            } else {
+                ERR("Failed to generate pattern for address 0x{:X}", address);
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void DisassemblyPane::PatternViewerModal(const std::string& name, const std::any& payload)
+{
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2 { 0.5f, 0.5f });
+    if (ImGui::BeginPopupModal(name.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+            && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        std::string pattern = std::any_cast<std::string>(payload);
+
+        ImGui::Text("The generated pattern is: %s", pattern.c_str());
+
+        ImGui::Separator();
+
+        if (ImGui::Button("Copy to Clipboard")) {
+            ImGui::SetClipboardText(pattern.c_str());
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close")) {
             ImGui::CloseCurrentPopup();
         }
 

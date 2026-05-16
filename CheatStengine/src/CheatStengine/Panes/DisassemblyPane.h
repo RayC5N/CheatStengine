@@ -35,7 +35,7 @@ public:
 
     void Draw(double deltaTime) override;
 
-    void FocusAddress(uintptr_t address);
+    void ScrollToAddress(uintptr_t address);
     void JumpToAddress(uintptr_t address);
 
 private:
@@ -52,6 +52,8 @@ private:
 
     void AssembleModal(const std::string& name, const std::any& payload);
     void GotoAddressModal(const std::string& name, const std::any& payload);
+    void PatternGeneratorModal(const std::string& name, const std::any& payload);
+    void PatternViewerModal(const std::string& name, const std::any& payload);
 
 private:
     ModalManager& m_ModalManager;
@@ -59,11 +61,11 @@ private:
 
     zasm::Decoder m_Decoder;
     std::string m_AddressInput;
-    uintptr_t m_FocussedAddress = 0;
+    uintptr_t m_ScrollAddress = 0;
     uintptr_t m_SelectedAddress = 0;
 
     struct JumpPoint {
-        uintptr_t FocussedAddress;
+        uintptr_t ScrollAddress;
         uintptr_t SelectedAddress;
     };
 

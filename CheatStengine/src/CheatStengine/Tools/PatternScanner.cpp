@@ -2,9 +2,9 @@
 
 #include <charconv>
 
-static std::vector<int> ParsePattern(std::string_view pattern)
+static std::vector<int16_t> ParsePattern(std::string_view pattern)
 {
-    std::vector<int> bytes;
+    std::vector<int16_t> bytes;
     bytes.reserve(std::count(pattern.begin(), pattern.end(), ' ') + 1);
 
     while (!pattern.empty()) {
@@ -14,7 +14,7 @@ static std::vector<int> ParsePattern(std::string_view pattern)
         if (byte == "?" || byte == "??") {
             bytes.push_back(-1);
         } else {
-            int value = 0;
+            int16_t value = 0;
             auto [ptr, ec] = std::from_chars(byte.data(), byte.data() + byte.size(), value, 16);
             if (ec == std::errc()) {
                 bytes.push_back(value);
@@ -32,7 +32,7 @@ static std::vector<int> ParsePattern(std::string_view pattern)
     return bytes;
 }
 
-static bool CompareSignature(const uint8_t* data, const int* sig, size_t sigSize)
+static bool CompareSignature(const uint8_t* data, const int16_t* sig, size_t sigSize)
 {
     // This can be further optimized with SIMD instructions
     for (size_t j = 0; j < sigSize; ++j) {
@@ -43,7 +43,7 @@ static bool CompareSignature(const uint8_t* data, const int* sig, size_t sigSize
     return true;
 }
 
-static uintptr_t SigScanInBuffer(uintptr_t base, const std::vector<uint8_t>& buffer, const std::vector<int>& sig)
+static uintptr_t SigScanInBuffer(uintptr_t base, const std::vector<uint8_t>& buffer, const std::vector<int16_t>& sig)
 {
     if (sig.empty() || buffer.size() < sig.size()) {
         return 0;
@@ -52,7 +52,7 @@ static uintptr_t SigScanInBuffer(uintptr_t base, const std::vector<uint8_t>& buf
     const uint8_t* data = buffer.data();
     size_t size = buffer.size();
     size_t sigSize = sig.size();
-    const int* sig_data = sig.data();
+    const int16_t* sig_data = sig.data();
 
     // Quick check for single-byte pattern
     if (sigSize == 1) {
@@ -91,9 +91,12 @@ PatternScanner::PatternScanner(std::unique_ptr<Process>& process)
 {
 }
 
-std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, uintptr_t start, uintptr_t end, bool stopAtFirst) const
+std::vector<uintptr_t> PatternScanner::PatternScan(const std::vector<uint8_t>& bytes, const std::vector<bool>& mask, uintptr_t start, uintptr_t end, size_t count) const
 {
-    std::vector<int> sig = ParsePattern(pattern);
+    std::vector<int16_t> sig(mask.size());
+    for (size_t i = 0; i < mask.size(); ++i) {
+        sig[i] = mask[i] ? -1 : bytes[i];
+    }
 
     std::vector<uintptr_t> results;
     while (start < end) {
@@ -119,7 +122,7 @@ std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, uin
 
         if (uintptr_t found = SigScanInBuffer(start, buffer, sig)) {
             results.push_back(found);
-            if (stopAtFirst) {
+            if (results.size() >= count && count > 0) {
                 break;
             }
         }
@@ -130,12 +133,60 @@ std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, uin
     return results;
 }
 
-std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, std::string_view moduleName, bool stopAtFirst) const
+std::optional<uintptr_t> PatternScanner::PatternScanOnce(const std::vector<uint8_t>& bytes, const std::vector<bool>& mask, uintptr_t start, uintptr_t end) const
+{
+    std::vector<uintptr_t> results = PatternScan(bytes, mask, start, end, true);
+    if (!results.empty()) {
+        return results[0];
+    }
+    return std::nullopt;
+}
+
+std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, uintptr_t start, uintptr_t end, size_t count) const
+{
+    std::vector<int16_t> sig = ParsePattern(pattern);
+
+    std::vector<uintptr_t> results;
+    while (start < end) {
+        std::optional<MEMORY_BASIC_INFORMATION> mbi = m_Process->Query(start);
+        if (!mbi) {
+            break;
+        }
+
+        size_t regionSize = mbi->RegionSize;
+        uintptr_t regionEnd = start + regionSize;
+
+        // Skip uninteresting regions
+        if ((mbi->State != MEM_COMMIT) || (mbi->Protect & PAGE_GUARD) || !(mbi->Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_READWRITE))) {
+            start = regionEnd;
+            continue;
+        }
+
+        std::vector<uint8_t> buffer(regionSize);
+        if (!m_Process->ReadBuffer(start, buffer.data(), regionSize)) {
+            start = regionEnd;
+            continue;
+        }
+
+        if (uintptr_t found = SigScanInBuffer(start, buffer, sig)) {
+            results.push_back(found);
+            if (results.size() >= count && count > 0) {
+                break;
+            }
+        }
+
+        start = regionEnd;
+    }
+
+    return results;
+}
+
+std::vector<uintptr_t> PatternScanner::PatternScan(std::string_view pattern, std::string_view moduleName, size_t count) const
 {
     MODULEENTRY32 moduleEntry = m_Process->GetModuleEntry(moduleName);
     return PatternScan(pattern,
         reinterpret_cast<uintptr_t>(moduleEntry.modBaseAddr),
-        reinterpret_cast<uintptr_t>(moduleEntry.modBaseAddr) + moduleEntry.modBaseSize, stopAtFirst);
+        reinterpret_cast<uintptr_t>(moduleEntry.modBaseAddr) + moduleEntry.modBaseSize, count);
 }
 
 std::optional<uintptr_t> PatternScanner::PatternScanOnce(std::string_view pattern, uintptr_t start, uintptr_t end) const

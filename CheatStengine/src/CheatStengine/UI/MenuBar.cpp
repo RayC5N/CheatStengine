@@ -214,7 +214,7 @@ void MenuBar::AllocateMemoryModal(const std::string& name, const std::any& paylo
                 return;
             }
             DisassemblyPane* pane = m_MainLayer.GetPane<DisassemblyPane>();
-            pane->FocusAddress(address);
+            pane->ScrollToAddress(address);
             pane->ForceFocus();
         } catch (const std::exception&) {
         }
