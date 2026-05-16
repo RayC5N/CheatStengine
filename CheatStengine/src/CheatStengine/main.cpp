@@ -39,6 +39,9 @@ public:
 Application* CreateApplication()
 {
     // std::unique_ptr<Process> proc = Process::Create("Notepad.exe", ProcessMode::Kernel);
+    //
+    // uintptr_t value = proc->Read<uintptr_t>(0x7FF7568F1000);
+    // INFO("Value: 0x{:X}", value);
 
     // std::optional<uint32_t> oldProtect = proc->Protect(0x24A299A0000, 0x1000, PAGE_EXECUTE_READWRITE);
     // if (oldProtect) {
@@ -59,9 +62,6 @@ Application* CreateApplication()
     // }
 
     // proc->Write<uintptr_t>(0x7FF705CD1132, 0xCCCCCCCC69CCCCCC);
-    //
-    // uintptr_t value = proc->Read<uintptr_t>(0x7FF705CD1132);
-    // INFO("Value at 0x7FF705CD1132: 0x{:X}", value);
 
     return new CheatStengine();
 }
