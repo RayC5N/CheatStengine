@@ -14,7 +14,6 @@
 #include <zasm/formatter/formatter.hpp>
 #include <zasm/x86/mnemonic.hpp>
 
-#include <CheatStengine/Tools/PatternGenerator.h>
 #include <format>
 
 static std::string FormatProtectionFlags(DWORD protection)
@@ -563,22 +562,20 @@ void DisassemblyPane::PatternGeneratorModal(const std::string& name, const std::
         ImGui::Separator();
         ImGui::Text("Generator Options:");
 
-        static PatternOptions options;
-
         // Checkbox options
-        ImGui::Checkbox("Wildcard Relative Immediates", &options.WildcardRelativeImmediates);
-        ImGui::Checkbox("Wildcard RIP Relative Displacement", &options.WildcardRipRelativeDisp);
-        ImGui::Checkbox("Wildcard Absolute Addresses", &options.WildcardAbsoluteAddresses);
-        ImGui::Checkbox("Wildcard All Immediates", &options.WildcardAllImmediates);
-        ImGui::Checkbox("Shortest Unique Pattern", &options.ShortestUnique);
+        ImGui::Checkbox("Wildcard Relative Immediates", &m_PatternOptions.WildcardRelativeImmediates);
+        ImGui::Checkbox("Wildcard RIP Relative Displacement", &m_PatternOptions.WildcardRipRelativeDisp);
+        ImGui::Checkbox("Wildcard Absolute Addresses", &m_PatternOptions.WildcardAbsoluteAddresses);
+        ImGui::Checkbox("Wildcard All Immediates", &m_PatternOptions.WildcardAllImmediates);
+        ImGui::Checkbox("Shortest Unique Pattern", &m_PatternOptions.ShortestUnique);
 
         // Slider for pattern length
         size_t min = 0, max = 300;
-        ImGui::SliderScalar("Max Pattern Length", ImGuiDataType_U64, &options.MaxPatternLength, &min, &max);
+        ImGui::SliderScalar("Max Pattern Length", ImGuiDataType_U64, &m_PatternOptions.MaxPatternLength, &min, &max);
 
         // Text inputs for separator and wildcard
-        ImGui::InputText("Separator", &options.Separator);
-        ImGui::InputText("Wildcard", &options.Wildcard);
+        ImGui::InputText("Separator", &m_PatternOptions.Separator);
+        ImGui::InputText("Wildcard", &m_PatternOptions.Wildcard);
 
         ImGui::Separator();
 
@@ -587,7 +584,7 @@ void DisassemblyPane::PatternGeneratorModal(const std::string& name, const std::
             size_t start = moduleEntry ? reinterpret_cast<uintptr_t>(moduleEntry->modBaseAddr) : 0;
             size_t end = moduleEntry ? reinterpret_cast<uintptr_t>(moduleEntry->modBaseAddr) + moduleEntry->modBaseSize : 0x7FFFFFFFFFFF;
 
-            PatternGenerator generator(options);
+            PatternGenerator generator(m_PatternOptions);
             std::optional<PatternResult> pattern = generator.Generate(m_State.Process, address, start, end);
             if (pattern) {
                 std::string patternStr = pattern->pattern;

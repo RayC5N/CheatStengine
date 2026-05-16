@@ -7,6 +7,7 @@
 #include <zasm/decoder/decoder.hpp>
 
 #include <CheatStengine/Core/KeybindManager.h>
+#include <CheatStengine/Tools/PatternGenerator.h>
 #include <map>
 #include <stack>
 #include <string>
@@ -63,6 +64,7 @@ private:
     std::string m_AddressInput;
     uintptr_t m_ScrollAddress = 0;
     uintptr_t m_SelectedAddress = 0;
+    PatternOptions m_PatternOptions;
 
     struct JumpPoint {
         uintptr_t ScrollAddress;

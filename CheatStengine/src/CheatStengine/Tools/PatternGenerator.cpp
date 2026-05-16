@@ -56,7 +56,7 @@ std::optional<PatternResult> PatternGenerator::Generate(std::unique_ptr<Process>
 
         // If we're generating the shortest unique pattern, we can stop as soon as we have at least one wildcard and a valid pattern.
         if (m_Options.ShortestUnique) {
-            std::vector<uintptr_t> results = scanner.PatternScan(bytes, mask, start, end, 2); // Scan nearby to check uniqueness
+            std::vector<uintptr_t> results = scanner.PatternScan(bytes, mask, start, end, 2);
             if (results.empty()) {
                 ERR("Generated pattern does not match any instructions in the specified range, which is unexpected. Address: 0x{:X}, Pattern: {}", address, FormatPattern(bytes, mask));
                 return std::nullopt;
